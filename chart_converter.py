@@ -44,9 +44,9 @@ VSLICE_METADATA_TEMPLATE: Dict[str, Any] = {
     "artist": "Unknown Artist",
     "charter": "Unknown Charter",
     "playData": {
-        "album": "",
-        "previewStart": 0,
-        "previewEnd": 0,
+        "album": "",  # NEW: album codename / name
+        "previewStart": 0,  # NEW: preview start in ms
+        "previewEnd": 0,    # NEW: preview end in ms
         "stage": "mainStage",
         "characters": {
             "player": "bf",
@@ -199,7 +199,13 @@ def psych_to_vslice(psych_chart: Dict[str, Any], difficulty_name: str = None) ->
 
     # -- BPM / Time signature handling ---------------------------------------
     bpm = songData.get('bpm', 120)
-    timeChanges.append({'t': 0, 'bpm': bpm})
+    timeChanges.append({
+        't': 0,
+        'bpm': bpm,
+        'd': 4,          # default numerator
+        'n': 4,          # default denominator
+        'bt': [4, 4, 4, 4]  # beat subdivision per measure
+    })
 
     # -- Section traversal ----------------------------------------------------
     time = 0
@@ -234,7 +240,13 @@ def psych_to_vslice(psych_chart: Dict[str, Any], difficulty_name: str = None) ->
 
             if section.get('changeBPM') and 'bpm' in section:
                 bpm = section['bpm']
-                timeChanges.append({'t': time, 'bpm': bpm})
+                timeChanges.append({
+                    't': time,
+                    'bpm': bpm,
+                    'd': 4,
+                    'n': 4,
+                    'bt': [4, 4, 4, 4]
+                })
 
             if lastMustHit != current_must_hit:
                 events.append({'t': time, 'e': 'FocusCamera', 'v': {'char': 0 if current_must_hit else 1}})
@@ -294,6 +306,19 @@ def psych_to_vslice(psych_chart: Dict[str, Any], difficulty_name: str = None) ->
     metadata['playData']['stage'] = stage
     metadata['timeChanges'] = timeChanges
     metadata['generatedBy'] = songData.get('generatedBy', 'Psych Engine Chart Editor V-Slice Exporter')
+
+    album_val = songData.get('album', '')
+    if not album_val:
+        write_to_log("INFO: 'album' missing in Psych chart. Defaulting to empty string.")
+    preview_start_val = songData.get('previewStart', 0)
+    if preview_start_val == 0:
+        write_to_log("INFO: 'previewStart' missing in Psych chart. Defaulting to 0ms.")
+    preview_end_val = songData.get('previewEnd', 0)
+    if preview_end_val == 0:
+        write_to_log("INFO: 'previewEnd' missing in Psych chart. Defaulting to 0ms.")
+    metadata['playData']['album'] = album_val
+    metadata['playData']['previewStart'] = preview_start_val
+    metadata['playData']['previewEnd'] = preview_end_val
 
     return {'chart': chart, 'metadata': metadata}
 
@@ -380,6 +405,15 @@ def vslice_to_psych(vslice_chart: Dict[str, Any], vslice_metadata: Dict[str, Any
     stage = vslice_metadata.get('playData', {}).get('stage', 'mainStage')
     stage = STAGE_TO_PSYCH.get(stage, stage)
 
+    # Log missing album/preview info
+    album_val_vs = vslice_metadata.get('playData', {}).get('album', '')
+    if not album_val_vs:
+        write_to_log("INFO: 'album' missing in VSlice metadata. Using empty string.")
+    preview_start_vs = vslice_metadata.get('playData', {}).get('previewStart', 0)
+    preview_end_vs = vslice_metadata.get('playData', {}).get('previewEnd', 0)
+    if preview_start_vs == 0 and preview_end_vs == 0:
+        write_to_log("INFO: 'previewStart'/'previewEnd' missing in VSlice metadata. Defaulting to 0ms.")
+
     notes_map: Dict[str, List[Dict[str, Any]]] = {}
     last_note_time = 0
     for diff in difficulties:
@@ -412,7 +446,10 @@ def vslice_to_psych(vslice_chart: Dict[str, Any], vslice_metadata: Dict[str, Any
     # -- Build Psych charts per difficulty ------------------------------------
     psych_charts: Dict[str, Dict] = {}
     for diff in difficulties:
-        scroll_speed = vslice_chart.get('scrollSpeed', {}).get(diff, vslice_chart.get('scrollSpeed', {}).get('default', 1.5))
+        scroll_speed = vslice_chart.get('scrollSpeed', {}).get(diff, vslice_chart.get('scrollSpeed', {}).get('default', None))
+        if scroll_speed is None:
+            write_to_log(f"INFO: scrollSpeed for diff '{diff}' not found. Defaulting to 1.5")
+            scroll_speed = 1.5
         notes = notes_map.get(diff, [])
         section_data = [dict(section, sectionNotes=[]) for section in base_sections]
         note_sec = 0
